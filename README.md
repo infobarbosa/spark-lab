@@ -231,7 +231,7 @@ RUN groupadd -r spark \
 # Download e instalação do Apache Spark
 # ============================================
 RUN curl -fsSL \
-    "https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-${HADOOP_VERSION}.tgz" \
+    "https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-${HADOOP_VERSION}.tgz" \
     | tar -xz -C /opt/ \
     && mv /opt/spark-${SPARK_VERSION}-bin-${HADOOP_VERSION} ${SPARK_HOME} \
     && chown -R spark:spark ${SPARK_HOME}
