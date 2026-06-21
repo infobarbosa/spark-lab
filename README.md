@@ -597,13 +597,20 @@ services:
       spark-master:
         condition: service_healthy
 
-  # ------------------------------------------
+# ------------------------------------------
   # OZONE - Storage Container Manager (SCM)
   # ------------------------------------------
   ozone-scm:
     image: apache/ozone:${OZONE_VERSION:-2.1.0}
     container_name: ozone-scm
     hostname: ozone-scm
+    environment:
+      OZONE-SITE.XML_ozone.om.address: ozone-om
+      OZONE-SITE.XML_ozone.scm.names: ozone-scm
+      OZONE-SITE.XML_ozone.scm.client.address: ozone-scm
+      OZONE-SITE.XML_ozone.scm.block.client.address: ozone-scm
+      OZONE-SITE.XML_ozone.metadata.dirs: /data/metadata
+      OZONE-SITE.XML_ozone.scm.datanode.id.dir: /data/metadata/datanode
     command: >
       bash -c "
         if [ ! -d /data/metadata/scm/current ]; then
@@ -615,7 +622,6 @@ services:
     ports:
       - "9876:9876"    # SCM Web UI
     volumes:
-      - ./ozone/ozone-site.xml:/etc/hadoop/ozone-site.xml
       - ozone-scm-data:/data
     networks:
       spark-net:
@@ -627,13 +633,20 @@ services:
       retries: 30
       start_period: 40s
 
-  # ------------------------------------------
+# ------------------------------------------
   # OZONE - Ozone Manager (OM)
   # ------------------------------------------
   ozone-om:
     image: apache/ozone:${OZONE_VERSION:-2.1.0}
     container_name: ozone-om
     hostname: ozone-om
+    environment:
+      OZONE-SITE.XML_ozone.om.address: ozone-om
+      OZONE-SITE.XML_ozone.scm.names: ozone-scm
+      OZONE-SITE.XML_ozone.scm.client.address: ozone-scm
+      OZONE-SITE.XML_ozone.scm.block.client.address: ozone-scm
+      OZONE-SITE.XML_ozone.metadata.dirs: /data/metadata
+      OZONE-SITE.XML_ozone.scm.datanode.id.dir: /data/metadata/datanode
     command: >
       bash -c "
         if [ ! -d /data/metadata/om/current ]; then
@@ -645,7 +658,6 @@ services:
     ports:
       - "9874:9874"    # OM Web UI
     volumes:
-      - ./ozone/ozone-site.xml:/etc/hadoop/ozone-site.xml
       - ozone-om-data:/data
     networks:
       spark-net:
@@ -654,18 +666,24 @@ services:
       ozone-scm:
         condition: service_healthy
 
-  # ------------------------------------------
+# ------------------------------------------
   # OZONE - DataNode
   # ------------------------------------------
   ozone-datanode:
     image: apache/ozone:${OZONE_VERSION:-2.1.0}
     container_name: ozone-datanode
     hostname: ozone-datanode
+    environment:
+      OZONE-SITE.XML_ozone.om.address: ozone-om
+      OZONE-SITE.XML_ozone.scm.names: ozone-scm
+      OZONE-SITE.XML_ozone.scm.client.address: ozone-scm
+      OZONE-SITE.XML_ozone.scm.block.client.address: ozone-scm
+      OZONE-SITE.XML_ozone.metadata.dirs: /data/metadata
+      OZONE-SITE.XML_ozone.scm.datanode.id.dir: /data/metadata/datanode
     command: ["ozone", "datanode"]
     ports:
       - "9882:9882"    # DataNode Web UI
     volumes:
-      - ./ozone/ozone-site.xml:/etc/hadoop/ozone-site.xml
       - ozone-dn-data:/data
     networks:
       spark-net:
