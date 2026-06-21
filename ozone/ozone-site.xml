@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+    Apache Ozone - Configuração Mínima
+    Setup com 1 SCM + 1 OM + 1 DataNode
+-->
+<configuration>
+
+    <!-- Endereço do Ozone Manager -->
+    <property>
+        <name>ozone.om.address</name>
+        <value>ozone-om</value>
+    </property>
+
+    <!-- Endereço do Storage Container Manager -->
+    <property>
+        <name>ozone.scm.names</name>
+        <value>ozone-scm</value>
+    </property>
+
+    <property>
+        <name>ozone.scm.client.address</name>
+        <value>ozone-scm</value>
+    </property>
+
+    <property>
+        <name>ozone.scm.block.client.address</name>
+        <value>ozone-scm</value>
+    </property>
+
+    <!-- Diretórios de dados e metadados -->
+    <property>
+        <name>ozone.scm.datanode.id.dir</name>
+        <value>/data/metadata</value>
+    </property>
+
+    <property>
+        <name>ozone.metadata.dirs</name>
+        <value>/data/metadata</value>
+    </property>
+
+    <property>
+        <name>hdds.datanode.dir</name>
+        <value>/data/hdds</value>
+    </property>
+
+    <!-- Safe mode: aceitar com apenas 1 DataNode -->
+    <property>
+        <name>hdds.scm.safemode.min.datanode</name>
+        <value>1</value>
+    </property>
+
+    <!-- Replicação: 1 cópia (temos apenas 1 DataNode) -->
+    <property>
+        <name>ozone.replication</name>
+        <value>ONE</value>
+    </property>
+
+</configuration>

@@ -1,1 +1,1112 @@
-# spark-lab
+# Apache Spark Cluster Lab
+
+- **Author**: Prof. Barbosa
+- **Contact**: infobarbosa@gmail.com
+- **Github**: [infobarbosa](https://github.com/infobarbosa)
+
+---
+
+## 1. Objetivo
+
+Neste laboratório, você vai construir **do zero** um cluster Apache Spark em modo **standalone** usando Docker.
+
+Ao final, você terá:
+- Um cluster Spark com **1 Master** e **4 Workers**
+- Um cluster **Apache Ozone** para armazenamento distribuído
+- Todas as interfaces web acessíveis no seu navegador
+- Um template pronto para submeter jobs PySpark
+
+---
+
+## 2. Arquitetura do Cluster
+
+O cluster é composto por **8 containers** Docker, todos na mesma rede bridge com IPs fixos:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Docker Bridge: spark-net                         │
+│                    Subnet: 172.30.0.0/24                           │
+│                                                                     │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
+│  │ spark-master │  │spark-worker-1│  │spark-worker-2│              │
+│  │ 172.30.0.10  │  │ 172.30.0.11  │  │ 172.30.0.12  │              │
+│  │ :8080 (UI)   │  │ :8081 (UI)   │  │ :8082 (UI)   │              │
+│  │ :7077 (RPC)  │  │              │  │              │              │
+│  │ :4040 (App)  │  │              │  │              │              │
+│  └──────────────┘  └──────────────┘  └──────────────┘              │
+│                                                                     │
+│  ┌──────────────┐  ┌──────────────┐                                │
+│  │spark-worker-3│  │spark-worker-4│                                │
+│  │ 172.30.0.13  │  │ 172.30.0.14  │                                │
+│  │ :8083 (UI)   │  │ :8084 (UI)   │                                │
+│  └──────────────┘  └──────────────┘                                │
+│                                                                     │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
+│  │  ozone-scm   │  │   ozone-om   │  │ozone-datanode│              │
+│  │ 172.30.0.20  │  │ 172.30.0.21  │  │ 172.30.0.22  │              │
+│  │ :9876 (UI)   │  │ :9874 (UI)   │  │ :9882 (UI)   │              │
+│  └──────────────┘  └──────────────┘  └──────────────┘              │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Tabela de Serviços
+
+| Serviço | IP | Porta | Descrição |
+|---------|-----|-------|-----------|
+| spark-master | 172.30.0.10 | 8080 | Spark Master Web UI |
+| spark-master | 172.30.0.10 | 7077 | Spark Master RPC |
+| spark-master | 172.30.0.10 | 4040 | Spark Application UI |
+| spark-worker-1 | 172.30.0.11 | 8081 | Worker 1 Web UI |
+| spark-worker-2 | 172.30.0.12 | 8082 | Worker 2 Web UI |
+| spark-worker-3 | 172.30.0.13 | 8083 | Worker 3 Web UI |
+| spark-worker-4 | 172.30.0.14 | 8084 | Worker 4 Web UI |
+| ozone-scm | 172.30.0.20 | 9876 | Storage Container Manager UI |
+| ozone-om | 172.30.0.21 | 9874 | Ozone Manager UI |
+| ozone-datanode | 172.30.0.22 | 9882 | DataNode Web UI |
+
+### Versões
+
+| Componente | Versão |
+|-----------|--------|
+| Apache Spark | 4.0.3 |
+| Java | 21 (Eclipse Temurin) |
+| Apache Ozone | 2.1.0 |
+| Imagem Base (Spark) | `eclipse-temurin:21-jdk-noble` |
+| Imagem Base (Ozone) | `apache/ozone:2.1.0` |
+
+---
+
+## 3. Pré-requisitos
+
+Antes de começar, verifique se você tem o Docker e o Docker Compose V2 instalados.
+
+**Docker Engine:**
+```bash
+docker --version
+```
+
+Saída esperada (versão 24 ou superior):
+```
+Docker version 27.x.x, build xxxxxxx
+```
+
+**Docker Compose V2:**
+```bash
+docker compose version
+```
+
+Saída esperada:
+```
+Docker Compose version v2.x.x
+```
+
+> **Nota:** Usamos `docker compose` (sem hífen), que é o Docker Compose V2 integrado como plugin do Docker.
+
+---
+
+## 4. Estrutura do Projeto
+
+Vamos criar a estrutura de diretórios do projeto:
+
+```bash
+mkdir -p spark ozone apps data
+```
+
+Verifique a estrutura criada:
+
+```bash
+find . -type d | head -20
+```
+
+Ao final deste laboratório, a estrutura completa será:
+
+```
+spark-lab/
+├── .env                         # Variáveis de ambiente
+├── docker-compose.yml           # Orquestração dos serviços
+├── spark/
+│   ├── Dockerfile               # Imagem customizada do Spark
+│   ├── entrypoint.sh            # Script de inicialização
+│   └── spark-defaults.conf      # Configuração do Spark
+├── ozone/
+│   └── ozone-site.xml           # Configuração do Ozone
+├── apps/
+│   └── example-job.py           # Template para jobs PySpark
+└── data/                        # Dados para processamento
+```
+
+---
+
+## 5. Arquivo de Variáveis de Ambiente (.env)
+
+O arquivo `.env` centraliza as configurações que o Docker Compose vai utilizar. Isso facilita a manutenção e evita valores hardcoded no `docker-compose.yml`.
+
+Crie o arquivo:
+
+```bash
+cat <<'EOF' > .env
+# ============================================
+# Apache Spark Cluster Lab - Variáveis
+# ============================================
+
+# Versões
+SPARK_VERSION=4.0.3
+OZONE_VERSION=2.1.0
+
+# Spark - Recursos por Worker
+SPARK_WORKER_CORES=2
+SPARK_WORKER_MEMORY=4g
+
+# Spark - Recursos do Driver/Executor (usado no spark-submit)
+SPARK_DRIVER_MEMORY=2g
+SPARK_EXECUTOR_MEMORY=2g
+EOF
+```
+
+Verifique o conteúdo:
+
+```bash
+cat .env
+```
+
+**Entendendo as variáveis:**
+- `SPARK_VERSION` / `OZONE_VERSION`: Versões dos componentes. Altere aqui para atualizar todo o cluster.
+- `SPARK_WORKER_CORES=2`: Cada worker usa 2 cores. Com 4 workers, são **8 cores** no total.
+- `SPARK_WORKER_MEMORY=4g`: Cada worker disponibiliza 4 GB para executors. Total: **16 GB**.
+- `SPARK_DRIVER_MEMORY` / `SPARK_EXECUTOR_MEMORY`: Memória usada ao submeter jobs.
+
+> **Nota:** Com 4 workers × 4 GB = 16 GB para o Spark, sobram ~16 GB para o sistema operacional, Ozone e overhead do Docker em uma máquina de 32 GB.
+
+---
+
+## 6. O Dockerfile do Spark
+
+Agora vamos construir a imagem Docker do Apache Spark **do zero**. Isso é mais didático do que usar imagens prontas porque você entende exatamente o que compõe a imagem.
+
+A imagem será baseada em `eclipse-temurin:21-jdk-noble`, que é o Ubuntu 24.04 com o Java 21 já instalado.
+
+Crie o arquivo:
+
+```bash
+cat <<'EOF' > spark/Dockerfile
+FROM eclipse-temurin:21-jdk-noble
+
+LABEL maintainer="Prof. Barbosa <infobarbosa@gmail.com>"
+LABEL description="Apache Spark 4.0.3 - Cluster Lab"
+
+# ============================================
+# Argumento de build
+# ============================================
+ARG SPARK_VERSION=4.0.3
+ARG HADOOP_VERSION=hadoop3
+
+# ============================================
+# Variáveis de ambiente
+# ============================================
+ENV SPARK_HOME=/opt/spark
+ENV PATH="${SPARK_HOME}/bin:${SPARK_HOME}/sbin:${PATH}"
+ENV PYSPARK_PYTHON=python3
+ENV PYSPARK_DRIVER_PYTHON=python3
+ENV SPARK_NO_DAEMONIZE=true
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
+# ============================================
+# Dependências do sistema
+# ============================================
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    procps \
+    tini \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# ============================================
+# Usuário spark (não-root)
+# ============================================
+RUN groupadd -r spark \
+    && useradd -r -g spark -m -d /home/spark spark
+
+# ============================================
+# Download e instalação do Apache Spark
+# ============================================
+RUN curl -fsSL \
+    "https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-${HADOOP_VERSION}.tgz" \
+    | tar -xz -C /opt/ \
+    && mv /opt/spark-${SPARK_VERSION}-bin-${HADOOP_VERSION} ${SPARK_HOME} \
+    && chown -R spark:spark ${SPARK_HOME}
+
+# ============================================
+# Diretórios auxiliares
+# ============================================
+RUN mkdir -p /tmp/spark-events \
+    && chown spark:spark /tmp/spark-events
+
+# ============================================
+# Arquivos de configuração
+# ============================================
+COPY spark-defaults.conf ${SPARK_HOME}/conf/spark-defaults.conf
+COPY entrypoint.sh /opt/entrypoint.sh
+
+RUN chmod +x /opt/entrypoint.sh \
+    && chown spark:spark /opt/entrypoint.sh \
+    && chown spark:spark ${SPARK_HOME}/conf/spark-defaults.conf
+
+# ============================================
+# Configuração final
+# ============================================
+WORKDIR ${SPARK_HOME}
+USER spark
+
+ENTRYPOINT ["tini", "--"]
+CMD ["/opt/entrypoint.sh"]
+EOF
+```
+
+**Entendendo o Dockerfile:**
+
+| Instrução | O que faz |
+|-----------|-----------|
+| `FROM eclipse-temurin:21-jdk-noble` | Usa Ubuntu 24.04 com Java 21 como base |
+| `ARG SPARK_VERSION` | Permite mudar a versão do Spark no build sem editar o arquivo |
+| `ENV SPARK_NO_DAEMONIZE=true` | Força o Spark a rodar em foreground (necessário para Docker) |
+| `ENV PIP_BREAK_SYSTEM_PACKAGES=1` | Permite instalar pacotes Python com pip no Ubuntu 24.04 |
+| `tini` | Gerenciador de processos leve; trata sinais (SIGTERM) corretamente |
+| `python3` + `python3-pip` | Necessários para rodar jobs PySpark |
+| `groupadd` / `useradd` | Cria usuário não-root (boa prática de segurança) |
+| `curl ... \| tar -xz` | Baixa o Spark do mirror Apache e extrai em `/opt/spark` |
+| `USER spark` | O container roda como usuário `spark`, não como root |
+| `ENTRYPOINT ["tini", "--"]` | Tini como PID 1; o CMD define o processo principal |
+
+---
+
+## 7. O Script de Entrypoint
+
+O script de entrypoint é o "cérebro" do container. Ele decide se o container deve iniciar como **Master** ou como **Worker** baseado na variável de ambiente `SPARK_MODE`.
+
+Crie o arquivo:
+
+```bash
+cat <<'EOF' > spark/entrypoint.sh
+#!/bin/bash
+set -e
+
+# ============================================
+# Variáveis com valores padrão
+# ============================================
+SPARK_MODE=${SPARK_MODE:-master}
+SPARK_MASTER_URL=${SPARK_MASTER_URL:-spark://spark-master:7077}
+SPARK_WORKER_CORES=${SPARK_WORKER_CORES:-2}
+SPARK_WORKER_MEMORY=${SPARK_WORKER_MEMORY:-4g}
+SPARK_WORKER_WEBUI_PORT=${SPARK_WORKER_WEBUI_PORT:-8081}
+
+echo "============================================"
+echo " Apache Spark - Modo: ${SPARK_MODE}"
+echo "============================================"
+
+if [ "$SPARK_MODE" = "master" ]; then
+    # ------------------------------------------
+    # Iniciar como MASTER
+    # ------------------------------------------
+    echo "Iniciando Spark Master..."
+
+    exec "${SPARK_HOME}/bin/spark-class" \
+        org.apache.spark.deploy.master.Master \
+        --host "$(hostname)" \
+        --port 7077 \
+        --webui-port 8080
+
+elif [ "$SPARK_MODE" = "worker" ]; then
+    # ------------------------------------------
+    # Iniciar como WORKER
+    # ------------------------------------------
+
+    # Aguardar o Master ficar disponível
+    echo "Aguardando Spark Master em ${SPARK_MASTER_URL}..."
+    while ! (echo > /dev/tcp/spark-master/7077) 2>/dev/null; do
+        echo "  Master ainda não disponível. Tentando em 2s..."
+        sleep 2
+    done
+    echo "Spark Master disponível!"
+
+    echo "Iniciando Worker com ${SPARK_WORKER_CORES} cores e ${SPARK_WORKER_MEMORY} de memória..."
+
+    exec "${SPARK_HOME}/bin/spark-class" \
+        org.apache.spark.deploy.worker.Worker \
+        --host "$(hostname)" \
+        --webui-port "${SPARK_WORKER_WEBUI_PORT}" \
+        --cores "${SPARK_WORKER_CORES}" \
+        --memory "${SPARK_WORKER_MEMORY}" \
+        "${SPARK_MASTER_URL}"
+
+else
+    echo "ERRO: SPARK_MODE deve ser 'master' ou 'worker'. Valor recebido: '${SPARK_MODE}'"
+    exit 1
+fi
+EOF
+```
+
+Torne o script executável:
+
+```bash
+chmod +x spark/entrypoint.sh
+```
+
+**Entendendo o script:**
+
+- `set -e`: O script para imediatamente se qualquer comando falhar.
+- `SPARK_MODE`: Variável que define o papel do container (`master` ou `worker`).
+- `/dev/tcp/spark-master/7077`: Recurso nativo do Bash para testar se uma porta TCP está aberta. O worker fica em loop até o Master aceitar conexões.
+- `exec`: Substitui o processo do shell pelo processo do Spark. Isso garante que o Spark seja o processo principal (PID 1 via tini) e receba sinais do Docker corretamente.
+- `spark-class`: Comando interno do Spark que inicia uma classe Java específica (Master ou Worker).
+
+---
+
+## 8. Configuração do Spark
+
+O arquivo `spark-defaults.conf` define as configurações padrão do Spark. Essas propriedades são aplicadas automaticamente em todos os jobs.
+
+Crie o arquivo:
+
+```bash
+cat <<'EOF' > spark/spark-defaults.conf
+# ============================================
+# Apache Spark - Configuração Padrão
+# ============================================
+
+# Endereço do Master
+spark.master                        spark://spark-master:7077
+
+# Event Log (histórico de jobs)
+spark.eventLog.enabled              true
+spark.eventLog.dir                  /tmp/spark-events
+spark.history.fs.logDirectory       /tmp/spark-events
+
+# Reverse Proxy (permite navegar nas UIs dos Workers via Master UI)
+spark.ui.reverseProxy               true
+EOF
+```
+
+**Entendendo as propriedades:**
+
+| Propriedade | Descrição |
+|-------------|-----------|
+| `spark.master` | URL do Master. Os Workers e jobs usam esse endereço para se conectar. |
+| `spark.eventLog.enabled` | Habilita o registro de eventos dos jobs para análise posterior. |
+| `spark.eventLog.dir` | Diretório onde os event logs são salvos. |
+| `spark.ui.reverseProxy` | Permite acessar as UIs dos Workers **através** da UI do Master. Sem isso, os links apontariam para hostnames internos do Docker (inacessíveis de fora). |
+
+---
+
+## 9. Apache Ozone
+
+O **Apache Ozone** é um sistema de armazenamento distribuído compatível com a API S3 e o protocolo Hadoop. Ele é composto por três componentes principais:
+
+- **SCM** (Storage Container Manager): Gerencia os containers de armazenamento e os DataNodes.
+- **OM** (Ozone Manager): Gerencia o namespace (volumes, buckets, keys).
+- **DataNode**: Armazena os dados propriamente ditos.
+
+Neste lab, vamos usar o setup mínimo: **1 SCM + 1 OM + 1 DataNode**.
+
+Crie o arquivo de configuração:
+
+```bash
+cat <<'EOF' > ozone/ozone-site.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+    Apache Ozone - Configuração Mínima
+    Setup com 1 SCM + 1 OM + 1 DataNode
+-->
+<configuration>
+
+    <!-- Endereço do Ozone Manager -->
+    <property>
+        <name>ozone.om.address</name>
+        <value>ozone-om</value>
+    </property>
+
+    <!-- Endereço do Storage Container Manager -->
+    <property>
+        <name>ozone.scm.names</name>
+        <value>ozone-scm</value>
+    </property>
+
+    <property>
+        <name>ozone.scm.client.address</name>
+        <value>ozone-scm</value>
+    </property>
+
+    <property>
+        <name>ozone.scm.block.client.address</name>
+        <value>ozone-scm</value>
+    </property>
+
+    <!-- Diretórios de dados e metadados -->
+    <property>
+        <name>ozone.scm.datanode.id.dir</name>
+        <value>/data/metadata</value>
+    </property>
+
+    <property>
+        <name>ozone.metadata.dirs</name>
+        <value>/data/metadata</value>
+    </property>
+
+    <property>
+        <name>hdds.datanode.dir</name>
+        <value>/data/hdds</value>
+    </property>
+
+    <!-- Safe mode: aceitar com apenas 1 DataNode -->
+    <property>
+        <name>hdds.scm.safemode.min.datanode</name>
+        <value>1</value>
+    </property>
+
+    <!-- Replicação: 1 cópia (temos apenas 1 DataNode) -->
+    <property>
+        <name>ozone.replication</name>
+        <value>ONE</value>
+    </property>
+
+</configuration>
+EOF
+```
+
+**Entendendo as propriedades:**
+
+| Propriedade | Descrição |
+|-------------|-----------|
+| `ozone.om.address` | Hostname do Ozone Manager (nome do container Docker) |
+| `ozone.scm.names` | Hostname do SCM |
+| `hdds.scm.safemode.min.datanode` | Mínimo de DataNodes para sair do modo seguro. Setamos `1` porque temos apenas um DataNode. |
+| `ozone.replication` | Fator de replicação. `ONE` porque temos um único DataNode. Em produção, use `THREE`. |
+
+---
+
+## 10. Docker Compose
+
+O `docker-compose.yml` é o arquivo central que orquestra todos os containers. Ele define:
+- Os 5 serviços do Spark (1 master + 4 workers)
+- Os 3 serviços do Ozone (SCM + OM + DataNode)
+- A rede bridge com IPs fixos
+- Os volumes para persistência de dados
+
+Crie o arquivo:
+
+```bash
+cat <<'EOF' > docker-compose.yml
+# ============================================
+# Apache Spark Cluster Lab
+# Docker Compose - Todos os serviços
+# ============================================
+
+services:
+
+  # ------------------------------------------
+  # SPARK MASTER
+  # ------------------------------------------
+  spark-master:
+    build:
+      context: ./spark
+      args:
+        SPARK_VERSION: ${SPARK_VERSION:-4.0.3}
+    image: spark-lab:${SPARK_VERSION:-4.0.3}
+    container_name: spark-master
+    hostname: spark-master
+    environment:
+      SPARK_MODE: master
+    ports:
+      - "8080:8080"    # Master Web UI
+      - "7077:7077"    # Master RPC
+      - "4040:4040"    # Application Web UI
+    volumes:
+      - spark-events:/tmp/spark-events
+      - ./apps:/apps
+      - ./data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.10
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # ------------------------------------------
+  # SPARK WORKER 1
+  # ------------------------------------------
+  spark-worker-1:
+    image: spark-lab:${SPARK_VERSION:-4.0.3}
+    container_name: spark-worker-1
+    hostname: spark-worker-1
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
+      SPARK_WORKER_WEBUI_PORT: 8081
+    ports:
+      - "8081:8081"    # Worker 1 Web UI
+    volumes:
+      - spark-events:/tmp/spark-events
+      - ./data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.11
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  # ------------------------------------------
+  # SPARK WORKER 2
+  # ------------------------------------------
+  spark-worker-2:
+    image: spark-lab:${SPARK_VERSION:-4.0.3}
+    container_name: spark-worker-2
+    hostname: spark-worker-2
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
+      SPARK_WORKER_WEBUI_PORT: 8082
+    ports:
+      - "8082:8082"    # Worker 2 Web UI
+    volumes:
+      - spark-events:/tmp/spark-events
+      - ./data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.12
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  # ------------------------------------------
+  # SPARK WORKER 3
+  # ------------------------------------------
+  spark-worker-3:
+    image: spark-lab:${SPARK_VERSION:-4.0.3}
+    container_name: spark-worker-3
+    hostname: spark-worker-3
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
+      SPARK_WORKER_WEBUI_PORT: 8083
+    ports:
+      - "8083:8083"    # Worker 3 Web UI
+    volumes:
+      - spark-events:/tmp/spark-events
+      - ./data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.13
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  # ------------------------------------------
+  # SPARK WORKER 4
+  # ------------------------------------------
+  spark-worker-4:
+    image: spark-lab:${SPARK_VERSION:-4.0.3}
+    container_name: spark-worker-4
+    hostname: spark-worker-4
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
+      SPARK_WORKER_WEBUI_PORT: 8084
+    ports:
+      - "8084:8084"    # Worker 4 Web UI
+    volumes:
+      - spark-events:/tmp/spark-events
+      - ./data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.14
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  # ------------------------------------------
+  # OZONE - Storage Container Manager (SCM)
+  # ------------------------------------------
+  ozone-scm:
+    image: apache/ozone:${OZONE_VERSION:-2.1.0}
+    container_name: ozone-scm
+    hostname: ozone-scm
+    command: >
+      bash -c "
+        if [ ! -d /data/metadata/scm/current ]; then
+          echo 'Inicializando SCM...'
+          ozone scm --init
+        fi
+        exec ozone scm
+      "
+    ports:
+      - "9876:9876"    # SCM Web UI
+    volumes:
+      - ./ozone/ozone-site.xml:/etc/hadoop/ozone-site.xml
+      - ozone-scm-data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.20
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9876 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  # ------------------------------------------
+  # OZONE - Ozone Manager (OM)
+  # ------------------------------------------
+  ozone-om:
+    image: apache/ozone:${OZONE_VERSION:-2.1.0}
+    container_name: ozone-om
+    hostname: ozone-om
+    command: >
+      bash -c "
+        if [ ! -d /data/metadata/om/current ]; then
+          echo 'Inicializando OM...'
+          ozone om --init
+        fi
+        exec ozone om
+      "
+    ports:
+      - "9874:9874"    # OM Web UI
+    volumes:
+      - ./ozone/ozone-site.xml:/etc/hadoop/ozone-site.xml
+      - ozone-om-data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.21
+    depends_on:
+      ozone-scm:
+        condition: service_healthy
+
+  # ------------------------------------------
+  # OZONE - DataNode
+  # ------------------------------------------
+  ozone-datanode:
+    image: apache/ozone:${OZONE_VERSION:-2.1.0}
+    container_name: ozone-datanode
+    hostname: ozone-datanode
+    command: ["ozone", "datanode"]
+    ports:
+      - "9882:9882"    # DataNode Web UI
+    volumes:
+      - ./ozone/ozone-site.xml:/etc/hadoop/ozone-site.xml
+      - ozone-dn-data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.22
+    depends_on:
+      ozone-scm:
+        condition: service_healthy
+
+# ============================================
+# Rede
+# ============================================
+networks:
+  spark-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          gateway: 172.30.0.1
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  spark-events:
+  ozone-scm-data:
+  ozone-om-data:
+  ozone-dn-data:
+EOF
+```
+
+**Pontos importantes do Docker Compose:**
+
+1. **`build` + `image`**: O `spark-master` faz o build do Dockerfile e publica a imagem como `spark-lab:4.0.3`. Os workers **reutilizam** essa mesma imagem sem precisar rebuildar.
+
+2. **`depends_on` com `condition`**: Garante a ordem de inicialização:
+   - Workers só iniciam após o Master estar **saudável** (healthcheck passando)
+   - OM e DataNode só iniciam após o SCM estar **saudável**
+
+3. **`healthcheck`**: O Master precisa responder na porta 8080 para ser considerado saudável. Isso evita que workers tentem se conectar a um Master que ainda está subindo.
+
+4. **IPs fixos**: Cada container tem um IP fixo na subnet `172.30.0.0/24`. Isso garante previsibilidade e facilita o troubleshooting.
+
+5. **Volumes nomeados**: Os dados do Ozone e os event logs do Spark persistem entre reinicializações do cluster.
+
+---
+
+## 11. Build da Imagem Spark
+
+Com todos os arquivos criados, vamos construir a imagem Docker do Spark:
+
+```bash
+docker compose build
+```
+
+> **Nota:** O download do Apache Spark (~400 MB) acontece durante o build. Isso pode levar alguns minutos dependendo da sua conexão.
+
+Verifique se a imagem foi criada:
+
+```bash
+docker images | grep spark-lab
+```
+
+Saída esperada:
+```
+spark-lab   4.0.3   xxxxxxxxxxxx   X seconds ago   XXX MB
+```
+
+---
+
+## 12. Subindo o Cluster
+
+Agora vamos iniciar todo o cluster:
+
+```bash
+docker compose up -d
+```
+
+O Docker Compose vai:
+1. Baixar a imagem do Apache Ozone (se ainda não tiver)
+2. Criar a rede `spark-net`
+3. Iniciar o SCM do Ozone (e inicializá-lo na primeira vez)
+4. Aguardar o SCM ficar saudável, depois iniciar o OM e DataNode
+5. Iniciar o Spark Master
+6. Aguardar o Master ficar saudável, depois iniciar os 4 Workers
+
+Acompanhe o progresso:
+
+```bash
+docker compose ps
+```
+
+Aguarde até que todos os containers estejam com status `Up` ou `Up (healthy)`.
+
+---
+
+## 13. Verificação do Cluster
+
+### 13.1 Status dos containers
+
+```bash
+docker compose ps
+```
+
+Todos os 8 containers devem estar rodando:
+
+```
+NAME              STATUS
+ozone-datanode    Up
+ozone-om          Up
+ozone-scm         Up (healthy)
+spark-master      Up (healthy)
+spark-worker-1    Up
+spark-worker-2    Up
+spark-worker-3    Up
+spark-worker-4    Up
+```
+
+### 13.2 Logs do Spark Master
+
+Verifique se o Master iniciou corretamente:
+
+```bash
+docker compose logs spark-master 2>&1 | head -30
+```
+
+Procure pela linha que confirma o Master rodando:
+```
+Spark Master - Modo: master
+Iniciando Spark Master...
+```
+
+### 13.3 Workers registrados
+
+Verifique se os 4 workers se registraram no Master:
+
+```bash
+docker compose logs spark-master 2>&1 | grep -i "registering worker"
+```
+
+Você deve ver 4 linhas, uma para cada worker.
+
+### 13.4 Logs de um Worker
+
+```bash
+docker compose logs spark-worker-1 2>&1 | head -20
+```
+
+### 13.5 Logs do Ozone
+
+```bash
+docker compose logs ozone-scm 2>&1 | head -20
+```
+
+```bash
+docker compose logs ozone-om 2>&1 | head -20
+```
+
+---
+
+## 14. Interfaces Web (UIs)
+
+Acesse as interfaces web pelo navegador. Substitua `<IP_DO_HOST>` pelo IP da sua máquina Linux.
+
+> **Exemplo:** Se o IP do seu Linux é `192.168.0.233`, acesse `http://192.168.0.233:8080`.
+
+Para verificar o IP do host:
+
+```bash
+hostname -I | awk '{print $1}'
+```
+
+### Spark
+
+| Interface | URL |
+|-----------|-----|
+| **Spark Master UI** | `http://<IP_DO_HOST>:8080` |
+| **Spark Application UI** | `http://<IP_DO_HOST>:4040` (disponível quando há job rodando) |
+| **Worker 1 UI** | `http://<IP_DO_HOST>:8081` |
+| **Worker 2 UI** | `http://<IP_DO_HOST>:8082` |
+| **Worker 3 UI** | `http://<IP_DO_HOST>:8083` |
+| **Worker 4 UI** | `http://<IP_DO_HOST>:8084` |
+
+Na **Spark Master UI** (porta 8080), você deve ver:
+- **Workers**: 4 workers ativos
+- **Cores**: 8 cores no total (4 workers × 2 cores)
+- **Memory**: 16.0 GB no total (4 workers × 4 GB)
+
+> **Dica:** Com `spark.ui.reverseProxy=true` habilitado, você pode navegar para a UI de cada Worker clicando diretamente nos links da Master UI.
+
+### Apache Ozone
+
+| Interface | URL |
+|-----------|-----|
+| **Ozone SCM UI** | `http://<IP_DO_HOST>:9876` |
+| **Ozone Manager UI** | `http://<IP_DO_HOST>:9874` |
+| **DataNode UI** | `http://<IP_DO_HOST>:9882` |
+
+---
+
+## 15. Testando o Apache Ozone
+
+Vamos verificar se o Ozone está funcionando criando um volume, um bucket e fazendo upload de um arquivo.
+
+### 15.1 Criar um volume
+
+```bash
+docker compose exec ozone-om ozone sh volume create /test-volume
+```
+
+### 15.2 Criar um bucket
+
+```bash
+docker compose exec ozone-om ozone sh bucket create /test-volume/test-bucket
+```
+
+### 15.3 Listar volumes e buckets
+
+```bash
+docker compose exec ozone-om ozone sh volume list /
+```
+
+```bash
+docker compose exec ozone-om ozone sh bucket list /test-volume
+```
+
+### 15.4 Upload de um arquivo de teste
+
+Crie um arquivo de teste local:
+
+```bash
+echo "Olá, Apache Ozone! Teste do Spark Cluster Lab." > /tmp/ozone-test.txt
+```
+
+Copie para dentro do container e faça o upload:
+
+```bash
+docker cp /tmp/ozone-test.txt ozone-om:/tmp/ozone-test.txt
+```
+
+```bash
+docker compose exec ozone-om ozone sh key put /test-volume/test-bucket/test-key /tmp/ozone-test.txt
+```
+
+### 15.5 Download e verificação
+
+```bash
+docker compose exec ozone-om ozone sh key get /test-volume/test-bucket/test-key /tmp/ozone-download.txt
+```
+
+```bash
+docker compose exec ozone-om cat /tmp/ozone-download.txt
+```
+
+Se o output for `Olá, Apache Ozone! Teste do Spark Cluster Lab.`, o Ozone está funcionando corretamente! 🎉
+
+### 15.6 Limpar o teste
+
+```bash
+docker compose exec ozone-om ozone sh key delete /test-volume/test-bucket/test-key
+docker compose exec ozone-om ozone sh bucket delete /test-volume/test-bucket
+docker compose exec ozone-om ozone sh volume delete /test-volume
+```
+
+---
+
+## 16. Baixando a Base de Dados (Camada Raw)
+
+A base do **Bolsa Família** de Abril/2026 está disponível no [Portal da Transparência](https://portaldatransparencia.gov.br/download-de-dados/novo-bolsa-familia/202604).
+
+Baixe o arquivo `.zip` e mova-o para a pasta `data/`. Em seguida, descompacte-o:
+
+```bash
+cd data/
+unzip 202604_NovoBolsaFamilia.zip
+cd ..
+```
+
+Verifique os arquivos descompactados:
+
+```bash
+ls -lh data/
+```
+
+---
+
+## 17. Seu Primeiro Job (Template)
+
+Crie o template do job PySpark que será utilizado nos próximos exercícios:
+
+```bash
+cat <<'EOF' > apps/example-job.py
+"""
+Apache Spark Cluster Lab
+Template para exercícios futuros
+
+Author: Prof. Barbosa
+Contact: infobarbosa@gmail.com
+
+Uso:
+    docker compose exec spark-master spark-submit /apps/example-job.py
+"""
+
+from pyspark.sql import SparkSession
+
+# ============================================
+# Inicializar SparkSession
+# ============================================
+spark = SparkSession.builder \
+    .appName("example-job") \
+    .getOrCreate()
+
+print("=" * 50)
+print(" SparkSession inicializada com sucesso!")
+print(f" App Name : {spark.sparkContext.appName}")
+print(f" Master   : {spark.sparkContext.master}")
+print(f" Version  : {spark.version}")
+print("=" * 50)
+
+# ============================================
+# TODO: Implemente seu job aqui
+# ============================================
+
+# Exemplo de leitura de CSV:
+# df = spark.read.csv("/data/seu_arquivo.csv", header=True, sep=";")
+# df.show(10)
+# df.printSchema()
+# print(f"Total de registros: {df.count()}")
+
+# ============================================
+
+print("Job finalizado com sucesso!")
+spark.stop()
+EOF
+```
+
+### Executando o template
+
+Para validar que o cluster está processando jobs corretamente, submeta o template:
+
+```bash
+docker compose exec spark-master spark-submit /apps/example-job.py
+```
+
+Saída esperada:
+```
+==================================================
+ SparkSession inicializada com sucesso!
+ App Name : example-job
+ Master   : spark://spark-master:7077
+ Version  : 4.0.3
+==================================================
+Job finalizado com sucesso!
+```
+
+> **Dica:** Enquanto o job estiver rodando, acesse `http://<IP_DO_HOST>:4040` para ver a Application UI.
+
+---
+
+## 18. Parando o Cluster
+
+Para parar todos os containers (sem perder dados):
+
+```bash
+docker compose down
+```
+
+Para reiniciar o cluster posteriormente:
+
+```bash
+docker compose up -d
+```
+
+---
+
+## 19. Limpeza Completa
+
+Se você quiser remover **tudo** (containers, volumes, imagens):
+
+```bash
+# Parar e remover containers + volumes
+docker compose down -v
+```
+
+```bash
+# Remover a imagem do Spark
+docker rmi spark-lab:4.0.3
+```
+
+```bash
+# Remover a imagem do Ozone
+docker rmi apache/ozone:2.1.0
+```
+
+---
+
+## Parabéns! 🎉
+
+Você construiu com sucesso um cluster Apache Spark com armazenamento Apache Ozone, tudo rodando em Docker!
+
+**O que você aprendeu:**
+- Construir uma imagem Docker do Spark **do zero** com Dockerfile
+- Criar um script de entrypoint inteligente (master vs worker)
+- Configurar o Spark em modo standalone
+- Montar um cluster com Docker Compose usando **IPs fixos** e **health checks**
+- Configurar o Apache Ozone com setup mínimo
+- Submeter jobs PySpark para o cluster

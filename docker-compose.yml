@@ -1,0 +1,234 @@
+# ============================================
+# Apache Spark Cluster Lab
+# Docker Compose - Todos os serviços
+# ============================================
+
+services:
+
+  # ------------------------------------------
+  # SPARK MASTER
+  # ------------------------------------------
+  spark-master:
+    build:
+      context: ./spark
+      args:
+        SPARK_VERSION: ${SPARK_VERSION:-4.0.3}
+    image: spark-lab:${SPARK_VERSION:-4.0.3}
+    container_name: spark-master
+    hostname: spark-master
+    environment:
+      SPARK_MODE: master
+    ports:
+      - "8080:8080"    # Master Web UI
+      - "7077:7077"    # Master RPC
+      - "4040:4040"    # Application Web UI
+    volumes:
+      - spark-events:/tmp/spark-events
+      - ./apps:/apps
+      - ./data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.10
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # ------------------------------------------
+  # SPARK WORKER 1
+  # ------------------------------------------
+  spark-worker-1:
+    image: spark-lab:${SPARK_VERSION:-4.0.3}
+    container_name: spark-worker-1
+    hostname: spark-worker-1
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
+      SPARK_WORKER_WEBUI_PORT: 8081
+    ports:
+      - "8081:8081"    # Worker 1 Web UI
+    volumes:
+      - spark-events:/tmp/spark-events
+      - ./data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.11
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  # ------------------------------------------
+  # SPARK WORKER 2
+  # ------------------------------------------
+  spark-worker-2:
+    image: spark-lab:${SPARK_VERSION:-4.0.3}
+    container_name: spark-worker-2
+    hostname: spark-worker-2
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
+      SPARK_WORKER_WEBUI_PORT: 8082
+    ports:
+      - "8082:8082"    # Worker 2 Web UI
+    volumes:
+      - spark-events:/tmp/spark-events
+      - ./data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.12
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  # ------------------------------------------
+  # SPARK WORKER 3
+  # ------------------------------------------
+  spark-worker-3:
+    image: spark-lab:${SPARK_VERSION:-4.0.3}
+    container_name: spark-worker-3
+    hostname: spark-worker-3
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
+      SPARK_WORKER_WEBUI_PORT: 8083
+    ports:
+      - "8083:8083"    # Worker 3 Web UI
+    volumes:
+      - spark-events:/tmp/spark-events
+      - ./data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.13
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  # ------------------------------------------
+  # SPARK WORKER 4
+  # ------------------------------------------
+  spark-worker-4:
+    image: spark-lab:${SPARK_VERSION:-4.0.3}
+    container_name: spark-worker-4
+    hostname: spark-worker-4
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
+      SPARK_WORKER_WEBUI_PORT: 8084
+    ports:
+      - "8084:8084"    # Worker 4 Web UI
+    volumes:
+      - spark-events:/tmp/spark-events
+      - ./data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.14
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  # ------------------------------------------
+  # OZONE - Storage Container Manager (SCM)
+  # ------------------------------------------
+  ozone-scm:
+    image: apache/ozone:${OZONE_VERSION:-2.1.0}
+    container_name: ozone-scm
+    hostname: ozone-scm
+    command: >
+      bash -c "
+        if [ ! -d /data/metadata/scm/current ]; then
+          echo 'Inicializando SCM...'
+          ozone scm --init
+        fi
+        exec ozone scm
+      "
+    ports:
+      - "9876:9876"    # SCM Web UI
+    volumes:
+      - ./ozone/ozone-site.xml:/etc/hadoop/ozone-site.xml
+      - ozone-scm-data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.20
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9876 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  # ------------------------------------------
+  # OZONE - Ozone Manager (OM)
+  # ------------------------------------------
+  ozone-om:
+    image: apache/ozone:${OZONE_VERSION:-2.1.0}
+    container_name: ozone-om
+    hostname: ozone-om
+    command: >
+      bash -c "
+        if [ ! -d /data/metadata/om/current ]; then
+          echo 'Inicializando OM...'
+          ozone om --init
+        fi
+        exec ozone om
+      "
+    ports:
+      - "9874:9874"    # OM Web UI
+    volumes:
+      - ./ozone/ozone-site.xml:/etc/hadoop/ozone-site.xml
+      - ozone-om-data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.21
+    depends_on:
+      ozone-scm:
+        condition: service_healthy
+
+  # ------------------------------------------
+  # OZONE - DataNode
+  # ------------------------------------------
+  ozone-datanode:
+    image: apache/ozone:${OZONE_VERSION:-2.1.0}
+    container_name: ozone-datanode
+    hostname: ozone-datanode
+    command: ["ozone", "datanode"]
+    ports:
+      - "9882:9882"    # DataNode Web UI
+    volumes:
+      - ./ozone/ozone-site.xml:/etc/hadoop/ozone-site.xml
+      - ozone-dn-data:/data
+    networks:
+      spark-net:
+        ipv4_address: 172.30.0.22
+    depends_on:
+      ozone-scm:
+        condition: service_healthy
+
+# ============================================
+# Rede
+# ============================================
+networks:
+  spark-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          gateway: 172.30.0.1
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  spark-events:
+  ozone-scm-data:
+  ozone-om-data:
+  ozone-dn-data:
