@@ -86,55 +86,6 @@ services:
       spark-master:
         condition: service_healthy
 
-  # ------------------------------------------
-  # SPARK WORKER 3
-  # ------------------------------------------
-  spark-worker-3:
-    image: spark-lab:${SPARK_VERSION:-4.0.3}
-    container_name: spark-worker-3
-    hostname: spark-worker-3
-    environment:
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
-      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
-      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
-      SPARK_WORKER_WEBUI_PORT: 8083
-    ports:
-      - "8083:8083"    # Worker 3 Web UI
-    volumes:
-      - spark-events:/tmp/spark-events
-      - ./data:/data
-    networks:
-      spark-net:
-        ipv4_address: 172.30.0.13
-    depends_on:
-      spark-master:
-        condition: service_healthy
-
-  # ------------------------------------------
-  # SPARK WORKER 4
-  # ------------------------------------------
-  spark-worker-4:
-    image: spark-lab:${SPARK_VERSION:-4.0.3}
-    container_name: spark-worker-4
-    hostname: spark-worker-4
-    environment:
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
-      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
-      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
-      SPARK_WORKER_WEBUI_PORT: 8084
-    ports:
-      - "8084:8084"    # Worker 4 Web UI
-    volumes:
-      - spark-events:/tmp/spark-events
-      - ./data:/data
-    networks:
-      spark-net:
-        ipv4_address: 172.30.0.14
-    depends_on:
-      spark-master:
-        condition: service_healthy
 
   # ------------------------------------------
   # OZONE - Storage Container Manager (SCM)

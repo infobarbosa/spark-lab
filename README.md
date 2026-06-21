@@ -11,7 +11,7 @@
 Neste laboratório, você vai construir **do zero** um cluster Apache Spark em modo **standalone** usando Docker.
 
 Ao final, você terá:
-- Um cluster Spark com **1 Master** e **4 Workers**
+- Um cluster Spark com **1 Master** e **2 Workers**
 - Um cluster **Apache Ozone** para armazenamento distribuído
 - Todas as interfaces web acessíveis no seu navegador
 - Um template pronto para submeter jobs PySpark
@@ -20,32 +20,26 @@ Ao final, você terá:
 
 ## 2. Arquitetura do Cluster
 
-O cluster é composto por **8 containers** Docker, todos na mesma rede bridge com IPs fixos:
+O cluster é composto por **6 containers** Docker, todos na mesma rede bridge com IPs fixos:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    Docker Bridge: spark-net                         │
-│                    Subnet: 172.30.0.0/24                           │
+│                    Subnet: 172.30.0.0/24                            │
 │                                                                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
-│  │ spark-master │  │spark-worker-1│  │spark-worker-2│              │
-│  │ 172.30.0.10  │  │ 172.30.0.11  │  │ 172.30.0.12  │              │
-│  │ :8080 (UI)   │  │ :8081 (UI)   │  │ :8082 (UI)   │              │
-│  │ :7077 (RPC)  │  │              │  │              │              │
-│  │ :4040 (App)  │  │              │  │              │              │
-│  └──────────────┘  └──────────────┘  └──────────────┘              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │
+│  │ spark-master │  │spark-worker-1│  │spark-worker-2│               │
+│  │ 172.30.0.10  │  │ 172.30.0.11  │  │ 172.30.0.12  │               │
+│  │ :8080 (UI)   │  │ :8081 (UI)   │  │ :8082 (UI)   │               │
+│  │ :7077 (RPC)  │  │              │  │              │               │
+│  │ :4040 (App)  │  │              │  │              │               │
+│  └──────────────┘  └──────────────┘  └──────────────┘               │
 │                                                                     │
-│  ┌──────────────┐  ┌──────────────┐                                │
-│  │spark-worker-3│  │spark-worker-4│                                │
-│  │ 172.30.0.13  │  │ 172.30.0.14  │                                │
-│  │ :8083 (UI)   │  │ :8084 (UI)   │                                │
-│  └──────────────┘  └──────────────┘                                │
-│                                                                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
-│  │  ozone-scm   │  │   ozone-om   │  │ozone-datanode│              │
-│  │ 172.30.0.20  │  │ 172.30.0.21  │  │ 172.30.0.22  │              │
-│  │ :9876 (UI)   │  │ :9874 (UI)   │  │ :9882 (UI)   │              │
-│  └──────────────┘  └──────────────┘  └──────────────┘              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │
+│  │  ozone-scm   │  │   ozone-om   │  │ozone-datanode│               │
+│  │ 172.30.0.20  │  │ 172.30.0.21  │  │ 172.30.0.22  │               │
+│  │ :9876 (UI)   │  │ :9874 (UI)   │  │ :9882 (UI)   │               │
+│  └──────────────┘  └──────────────┘  └──────────────┘               │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -58,8 +52,6 @@ O cluster é composto por **8 containers** Docker, todos na mesma rede bridge co
 | spark-master | 172.30.0.10 | 4040 | Spark Application UI |
 | spark-worker-1 | 172.30.0.11 | 8081 | Worker 1 Web UI |
 | spark-worker-2 | 172.30.0.12 | 8082 | Worker 2 Web UI |
-| spark-worker-3 | 172.30.0.13 | 8083 | Worker 3 Web UI |
-| spark-worker-4 | 172.30.0.14 | 8084 | Worker 4 Web UI |
 | ozone-scm | 172.30.0.20 | 9876 | Storage Container Manager UI |
 | ozone-om | 172.30.0.21 | 9874 | Ozone Manager UI |
 | ozone-datanode | 172.30.0.22 | 9882 | DataNode Web UI |
@@ -171,11 +163,11 @@ cat .env
 
 **Entendendo as variáveis:**
 - `SPARK_VERSION` / `OZONE_VERSION`: Versões dos componentes. Altere aqui para atualizar todo o cluster.
-- `SPARK_WORKER_CORES=2`: Cada worker usa 2 cores. Com 4 workers, são **8 cores** no total.
-- `SPARK_WORKER_MEMORY=4g`: Cada worker disponibiliza 4 GB para executors. Total: **16 GB**.
+- `SPARK_WORKER_CORES=2`: Cada worker usa 2 cores. Com 2 workers, são **4 cores** no total.
+- `SPARK_WORKER_MEMORY=4g`: Cada worker disponibiliza 4 GB para executors. Total: **8 GB**.
 - `SPARK_DRIVER_MEMORY` / `SPARK_EXECUTOR_MEMORY`: Memória usada ao submeter jobs.
 
-> **Nota:** Com 4 workers × 4 GB = 16 GB para o Spark, sobram ~16 GB para o sistema operacional, Ozone e overhead do Docker em uma máquina de 32 GB.
+> **Nota:** Com 2 workers × 4 GB = 8 GB para o Spark, sobram ~24 GB para o sistema operacional, Ozone e overhead do Docker em uma máquina de 32 GB.
 
 ---
 
@@ -488,7 +480,7 @@ EOF
 ## 10. Docker Compose
 
 O `docker-compose.yml` é o arquivo central que orquestra todos os containers. Ele define:
-- Os 5 serviços do Spark (1 master + 4 workers)
+- Os 3 serviços do Spark (1 master + 2 workers)
 - Os 3 serviços do Ozone (SCM + OM + DataNode)
 - A rede bridge com IPs fixos
 - Os volumes para persistência de dados
@@ -581,56 +573,6 @@ services:
     networks:
       spark-net:
         ipv4_address: 172.30.0.12
-    depends_on:
-      spark-master:
-        condition: service_healthy
-
-  # ------------------------------------------
-  # SPARK WORKER 3
-  # ------------------------------------------
-  spark-worker-3:
-    image: spark-lab:${SPARK_VERSION:-4.0.3}
-    container_name: spark-worker-3
-    hostname: spark-worker-3
-    environment:
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
-      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
-      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
-      SPARK_WORKER_WEBUI_PORT: 8083
-    ports:
-      - "8083:8083"    # Worker 3 Web UI
-    volumes:
-      - spark-events:/tmp/spark-events
-      - ./data:/data
-    networks:
-      spark-net:
-        ipv4_address: 172.30.0.13
-    depends_on:
-      spark-master:
-        condition: service_healthy
-
-  # ------------------------------------------
-  # SPARK WORKER 4
-  # ------------------------------------------
-  spark-worker-4:
-    image: spark-lab:${SPARK_VERSION:-4.0.3}
-    container_name: spark-worker-4
-    hostname: spark-worker-4
-    environment:
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
-      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES:-2}
-      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY:-4g}
-      SPARK_WORKER_WEBUI_PORT: 8084
-    ports:
-      - "8084:8084"    # Worker 4 Web UI
-    volumes:
-      - spark-events:/tmp/spark-events
-      - ./data:/data
-    networks:
-      spark-net:
-        ipv4_address: 172.30.0.14
     depends_on:
       spark-master:
         condition: service_healthy
@@ -787,7 +729,7 @@ O Docker Compose vai:
 3. Iniciar o SCM do Ozone (e inicializá-lo na primeira vez)
 4. Aguardar o SCM ficar saudável, depois iniciar o OM e DataNode
 5. Iniciar o Spark Master
-6. Aguardar o Master ficar saudável, depois iniciar os 4 Workers
+6. Aguardar o Master ficar saudável, depois iniciar os 2 Workers
 
 Acompanhe o progresso:
 
@@ -807,7 +749,7 @@ Aguarde até que todos os containers estejam com status `Up` ou `Up (healthy)`.
 docker compose ps
 ```
 
-Todos os 8 containers devem estar rodando:
+Todos os 6 containers devem estar rodando:
 
 ```
 NAME              STATUS
@@ -817,8 +759,6 @@ ozone-scm         Up (healthy)
 spark-master      Up (healthy)
 spark-worker-1    Up
 spark-worker-2    Up
-spark-worker-3    Up
-spark-worker-4    Up
 ```
 
 ### 13.2 Logs do Spark Master
@@ -837,13 +777,13 @@ Iniciando Spark Master...
 
 ### 13.3 Workers registrados
 
-Verifique se os 4 workers se registraram no Master:
+Verifique se os 2 workers se registraram no Master:
 
 ```bash
 docker compose logs spark-master 2>&1 | grep -i "registering worker"
 ```
 
-Você deve ver 4 linhas, uma para cada worker.
+Você deve ver 2 linhas, uma para cada worker.
 
 ### 13.4 Logs de um Worker
 
@@ -883,13 +823,11 @@ hostname -I | awk '{print $1}'
 | **Spark Application UI** | `http://<IP_DO_HOST>:4040` (disponível quando há job rodando) |
 | **Worker 1 UI** | `http://<IP_DO_HOST>:8081` |
 | **Worker 2 UI** | `http://<IP_DO_HOST>:8082` |
-| **Worker 3 UI** | `http://<IP_DO_HOST>:8083` |
-| **Worker 4 UI** | `http://<IP_DO_HOST>:8084` |
 
 Na **Spark Master UI** (porta 8080), você deve ver:
-- **Workers**: 4 workers ativos
-- **Cores**: 8 cores no total (4 workers × 2 cores)
-- **Memory**: 16.0 GB no total (4 workers × 4 GB)
+- **Workers**: 2 workers ativos
+- **Cores**: 4 cores no total (2 workers × 2 cores)
+- **Memory**: 8.0 GB no total (2 workers × 4 GB)
 
 > **Dica:** Com `spark.ui.reverseProxy=true` habilitado, você pode navegar para a UI de cada Worker clicando diretamente nos links da Master UI.
 
