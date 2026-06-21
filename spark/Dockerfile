@@ -37,13 +37,14 @@ RUN groupadd -r spark \
     && useradd -r -g spark -m -d /home/spark spark
 
 # ============================================
-# Download e instalação do Apache Spark
+# Instalação do Apache Spark
+# (o .tgz deve ser baixado previamente no host)
 # ============================================
-RUN curl -fsSL \
-    "https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-${HADOOP_VERSION}.tgz" \
-    | tar -xz -C /opt/ \
+COPY spark-${SPARK_VERSION}-bin-${HADOOP_VERSION}.tgz /tmp/spark.tgz
+RUN tar -xzf /tmp/spark.tgz -C /opt/ \
     && mv /opt/spark-${SPARK_VERSION}-bin-${HADOOP_VERSION} ${SPARK_HOME} \
-    && chown -R spark:spark ${SPARK_HOME}
+    && chown -R spark:spark ${SPARK_HOME} \
+    && rm /tmp/spark.tgz
 
 # ============================================
 # Diretórios auxiliares

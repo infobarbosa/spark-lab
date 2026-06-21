@@ -177,6 +177,25 @@ Agora vamos construir a imagem Docker do Apache Spark **do zero**. Isso é mais 
 
 A imagem será baseada em `eclipse-temurin:21-jdk-noble`, que é o Ubuntu 24.04 com o Java 21 já instalado.
 
+### 6.1 Baixando o Apache Spark
+
+Primeiro, baixe o arquivo do Apache Spark para dentro do diretório `spark/`:
+
+```bash
+wget -q --show-progress -O spark/spark-4.0.3-bin-hadoop3.tgz \
+    "https://downloads.apache.org/spark/spark-4.0.3/spark-4.0.3-bin-hadoop3.tgz"
+```
+
+> **Nota:** O arquivo tem ~524 MB. O download pode levar alguns minutos dependendo da sua conexão.
+
+Verifique o arquivo:
+
+```bash
+ls -lh spark/spark-4.0.3-bin-hadoop3.tgz
+```
+
+### 6.2 Criando o Dockerfile
+
 Crie o arquivo:
 
 ```bash
@@ -220,13 +239,14 @@ RUN groupadd -r spark \
     && useradd -r -g spark -m -d /home/spark spark
 
 # ============================================
-# Download e instalação do Apache Spark
+# Instalação do Apache Spark
+# (o .tgz deve ser baixado previamente no host)
 # ============================================
-RUN curl -fsSL \
-    "https://dlcdn.apache.org/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-${HADOOP_VERSION}.tgz" \
-    | tar -xz -C /opt/ \
+COPY spark-${SPARK_VERSION}-bin-${HADOOP_VERSION}.tgz /tmp/spark.tgz
+RUN tar -xzf /tmp/spark.tgz -C /opt/ \
     && mv /opt/spark-${SPARK_VERSION}-bin-${HADOOP_VERSION} ${SPARK_HOME} \
-    && chown -R spark:spark ${SPARK_HOME}
+    && chown -R spark:spark ${SPARK_HOME} \
+    && rm /tmp/spark.tgz
 
 # ============================================
 # Diretórios auxiliares
@@ -266,7 +286,7 @@ EOF
 | `tini` | Gerenciador de processos leve; trata sinais (SIGTERM) corretamente |
 | `python3` + `python3-pip` | Necessários para rodar jobs PySpark |
 | `groupadd` / `useradd` | Cria usuário não-root (boa prática de segurança) |
-| `curl ... \| tar -xz` | Baixa o Spark do mirror Apache e extrai em `/opt/spark` |
+| `COPY spark-*.tgz` | Copia o Spark pré-baixado para dentro da imagem (mais rápido que download no build) |
 | `USER spark` | O container roda como usuário `spark`, não como root |
 | `ENTRYPOINT ["tini", "--"]` | Tini como PID 1; o CMD define o processo principal |
 
