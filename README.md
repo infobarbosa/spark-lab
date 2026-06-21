@@ -967,74 +967,328 @@ ls -lh data/
 
 ## 17. Seu Primeiro Job (Template)
 
-Crie o template do job PySpark que será utilizado nos próximos exercícios:
+Nesta seção, você vai processar a base do **Bolsa Família de Abril/2026** com o Apache Spark integrado ao Apache Ozone. O objetivo é calcular o **total de pagamentos por UF (estado)**.
+
+Ao final, você terá:
+- Os dados brutos armazenados no Ozone (bucket `raw`)
+- Um job PySpark que lê do Ozone, transforma e agrega os dados
+- O resultado gravado de volta no Ozone (bucket `output`)
+
+---
+
+### 17.1 Configurando os buckets no Ozone
+
+O Ozone organiza os dados em **volumes** (semelhante a um namespace) e **buckets** (semelhante a um diretório raiz). Vamos criar a estrutura necessária para o exercício.
+
+**Criar o volume:**
+
+```bash
+docker compose exec ozone-om ozone sh volume create /lab
+```
+
+**Criar o bucket para dados brutos:**
+
+```bash
+docker compose exec ozone-om ozone sh bucket create /lab/raw
+```
+
+**Criar o bucket para o resultado do processamento:**
+
+```bash
+docker compose exec ozone-om ozone sh bucket create /lab/output
+```
+
+**Verificar a estrutura criada:**
+
+```bash
+docker compose exec ozone-om ozone sh volume list /
+```
+
+```bash
+docker compose exec ozone-om ozone sh bucket list /lab
+```
+
+---
+
+### 17.2 Baixando a base de dados
+
+> **Nota:** Caso você tenha seguido a Seção 16, o arquivo `.zip` já está disponível em `data/`. Você pode pular para a Seção 17.3.
+
+A base do **Bolsa Família** de Abril/2026 está disponível no [Portal da Transparência](https://portaldatransparencia.gov.br/download-de-dados/novo-bolsa-familia/202604). Baixe o arquivo `.zip` diretamente para a pasta `data/`:
+
+```bash
+wget -q --show-progress \
+    -O data/202604_NovoBolsaFamilia.zip \
+    "https://portaldatransparencia.gov.br/download-de-dados/novo-bolsa-familia/202604"
+```
+
+> **Nota:** O arquivo comprimido tem aproximadamente 350 MB.
+
+---
+
+### 17.3 Descompactando o arquivo
+
+> **Nota:** Caso você tenha seguido a Seção 16, este passo já foi realizado.
+
+```bash
+cd data/
+unzip 202604_NovoBolsaFamilia.zip
+cd ..
+```
+
+Verifique o arquivo extraído e inspecione as primeiras linhas:
+
+```bash
+ls -lh data/*.csv
+```
+
+```bash
+head -3 data/202604_NovoBolsaFamilia.csv
+```
+
+Observe que:
+- O separador de campos é `;` (ponto-e-vírgula)
+- O campo `VALOR PARCELA` usa `,` como separador decimal (ex.: `"800,00"`)
+- O arquivo está codificado em `ISO-8859-1` (Latin-1)
+
+---
+
+### 17.4 Copiando o arquivo para o container do Ozone
+
+O container `ozone-om` é quem executa o cliente Ozone (`ozone sh`). Para carregar o CSV no Ozone, precisamos primeiro copiá-lo para dentro desse container via `docker cp`:
+
+```bash
+docker cp data/202604_NovoBolsaFamilia.csv \
+    ozone-om:/tmp/202604_NovoBolsaFamilia.csv
+```
+
+> **Nota:** O arquivo CSV tem aproximadamente 2 GB. A cópia pode levar alguns minutos.
+
+---
+
+### 17.5 Carregando a base de dados no Ozone
+
+Com o arquivo disponível dentro do container, faça o upload para o bucket `raw`:
+
+```bash
+docker compose exec ozone-om ozone sh key put \
+    /lab/raw/202604_NovoBolsaFamilia.csv \
+    /tmp/202604_NovoBolsaFamilia.csv
+```
+
+Verifique se o arquivo foi carregado com sucesso:
+
+```bash
+docker compose exec ozone-om ozone sh key list /lab/raw
+```
+
+Saída esperada:
+```
+202604_NovoBolsaFamilia.csv
+```
+
+---
+
+### 17.6 Disponibilizando o JAR do Ozone para o Spark
+
+O Apache Spark não inclui suporte ao Ozone por padrão. Para usar o esquema `o3fs://`, o JAR precisa estar no **classpath do sistema** do Spark — ou seja, no diretório `/opt/spark/jars/` de todos os nós do cluster.
+
+> **Por que não usar `--jars`?** JARs passados via `--jars` são carregados por um classloader filho. A classe `ProtobufRpcEngine` (usada pelo cliente Ozone) já está carregada pelo classloader pai a partir do `hadoop-client-api-3.4.1.jar`. Pelo modelo de delegação do Java, o pai não enxerga classes do filho — por isso o JAR precisa estar no classloader do sistema.
+
+Copie o JAR para o diretório `jars/` em todos os containers do cluster. Como `docker cp` não suporta cópia direta entre containers, use o host como intermediário:
+
+```bash
+# Passo 1: extrair do container Ozone para o host
+docker cp ozone-om:/opt/hadoop/share/ozone/lib/ozone-filesystem-hadoop3-client-2.1.0.jar \
+    /tmp/ozone-filesystem-hadoop3.jar
+
+# Passo 2: distribuir para todos os containers Spark
+for container in spark-master spark-worker-1 spark-worker-2; do
+    docker cp /tmp/ozone-filesystem-hadoop3.jar \
+        ${container}:/opt/spark/jars/ozone-filesystem-hadoop3.jar
+done
+```
+
+Verifique:
+
+```bash
+docker compose exec spark-master ls -lh /opt/spark/jars/ozone-filesystem-hadoop3.jar
+```
+
+> **Nota:** Esta instalação é válida enquanto os containers estiverem em execução. Após `docker compose down` e `docker compose up -d`, repita este passo.
+
+---
+
+### 17.7 Criando o script example-job.py
+
+Crie o job PySpark que vai processar a base do Bolsa Família:
 
 ```bash
 cat <<'EOF' > apps/example-job.py
 """
 Apache Spark Cluster Lab
-Template para exercícios futuros
+Job: Bolsa Família - Total de Pagamentos por UF
 
 Author: Prof. Barbosa
 Contact: infobarbosa@gmail.com
 
 Uso:
-    docker compose exec spark-master spark-submit /apps/example-job.py
+    docker compose exec spark-master spark-submit \
+        --jars /data/ozone-filesystem-hadoop3.jar \
+        /apps/example-job.py
 """
 
 from pyspark.sql import SparkSession
+from pyspark.sql.functions import regexp_replace, col, sum as spark_sum
+from pyspark.sql.types import DoubleType
 
 # ============================================
-# Inicializar SparkSession
+# Inicializar SparkSession com suporte ao Ozone
 # ============================================
 spark = SparkSession.builder \
-    .appName("example-job") \
+    .appName("bolsa-familia-por-uf") \
+    .config("spark.hadoop.fs.o3fs.impl",
+            "org.apache.hadoop.fs.ozone.OzoneFileSystem") \
+    .config("spark.hadoop.ozone.om.address", "ozone-om") \
     .getOrCreate()
 
-print("=" * 50)
+print("=" * 60)
 print(" SparkSession inicializada com sucesso!")
 print(f" App Name : {spark.sparkContext.appName}")
 print(f" Master   : {spark.sparkContext.master}")
 print(f" Version  : {spark.version}")
-print("=" * 50)
+print("=" * 60)
 
 # ============================================
-# TODO: Implemente seu job aqui
+# Leitura do CSV a partir do Ozone (bucket raw)
 # ============================================
+INPUT_PATH = "o3fs://raw.lab/202604_NovoBolsaFamilia.csv"
 
-# Exemplo de leitura de CSV:
-# df = spark.read.csv("/data/seu_arquivo.csv", header=True, sep=";")
-# df.show(10)
-# df.printSchema()
-# print(f"Total de registros: {df.count()}")
+df = spark.read.csv(
+    INPUT_PATH,
+    header=True,
+    sep=";",
+    encoding="ISO-8859-1"
+)
+
+print("\nSchema do dataset:")
+df.printSchema()
+print(f"Total de registros lidos: {df.count():,}")
 
 # ============================================
+# Transformação: converter separador decimal
+# O campo VALOR PARCELA usa vírgula: "800,00" -> 800.00
+# ============================================
+df = df.withColumn(
+    "VALOR",
+    regexp_replace(col("VALOR PARCELA"), ",", ".").cast(DoubleType())
+)
 
+# ============================================
+# Agregação: somar o total pago por UF
+# ============================================
+resultado = df.groupBy("UF") \
+    .agg(spark_sum("VALOR").alias("TOTAL_PAGO")) \
+    .orderBy("UF")
+
+print("\nTotal de pagamentos por UF:")
+resultado.show(30, truncate=False)
+
+# ============================================
+# Escrita do resultado no Ozone (bucket output)
+# ============================================
+OUTPUT_PATH = "o3fs://output.lab/bolsafamilia-por-uf"
+
+resultado.write \
+    .mode("overwrite") \
+    .option("header", "true") \
+    .csv(OUTPUT_PATH)
+
+print(f"\nResultado gravado em: {OUTPUT_PATH}")
 print("Job finalizado com sucesso!")
 spark.stop()
 EOF
 ```
 
-### Executando o template
+---
 
-Para validar que o cluster está processando jobs corretamente, submeta o template:
+### 17.8 Parâmetros de integração Spark ↔ Ozone
+
+| Parâmetro | Valor | Descrição |
+|-----------|-------|-----------|
+| `spark.hadoop.fs.o3fs.impl` | `org.apache.hadoop.fs.ozone.OzoneFileSystem` | Registra a implementação do esquema `o3fs://` no Spark. Sem essa configuração, qualquer acesso a caminhos `o3fs://` falha com `No FileSystem for scheme`. |
+| `spark.hadoop.ozone.om.address` | `ozone-om` | Hostname do Ozone Manager (OM). O Spark usa esse endereço para resolver os metadados de volumes, buckets e keys. |
+| `/opt/spark/jars/ozone-filesystem-hadoop3.jar` | *(instalação no sistema)* | O JAR deve estar no diretório `jars/` do Spark em todos os nós. Isso o coloca no classloader do sistema, permitindo que `ProtobufRpcEngine` (Hadoop 3.4.x) encontre as classes do protocolo RPC do Ozone. |
+| `o3fs://bucket.volume/caminho` | *(URI de dados)* | Formato da URI do Ozone: `raw.lab` indica o bucket `raw` dentro do volume `lab`. O trecho após `/` é o nome da key (arquivo ou prefixo de diretório) dentro do bucket. |
+| `sep=";"` | *(opção de leitura CSV)* | O arquivo usa ponto-e-vírgula como separador de campos, padrão em arquivos CSV brasileiros. |
+| `encoding="ISO-8859-1"` | *(opção de leitura CSV)* | O arquivo usa codificação Latin-1, comum em exports de sistemas governamentais brasileiros. |
+| `regexp_replace(..., ",", ".")` | *(transformação)* | Converte o separador decimal de vírgula para ponto antes do cast para `DoubleType`, necessário porque o Spark espera notação decimal com ponto. |
+
+---
+
+### 17.9 Submetendo o job
 
 ```bash
 docker compose exec spark-master spark-submit /apps/example-job.py
 ```
 
-Saída esperada:
+Saída esperada (parcial):
 ```
-==================================================
+============================================================
  SparkSession inicializada com sucesso!
- App Name : example-job
+ App Name : bolsa-familia-por-uf
  Master   : spark://spark-master:7077
  Version  : 4.0.3
-==================================================
+============================================================
+
+Total de pagamentos por UF:
++---+--------------------+
+|UF |TOTAL_PAGO          |
++---+--------------------+
+|AC |...                 |
+|AL |...                 |
+|AM |...                 |
+...
++---+--------------------+
+
+Resultado gravado em: o3fs://output.lab/bolsafamilia-por-uf
 Job finalizado com sucesso!
 ```
 
-> **Dica:** Enquanto o job estiver rodando, acesse `http://<IP_DO_HOST>:4040` para ver a Application UI.
+> **Dica:** Enquanto o job estiver rodando, acesse `http://<IP_DO_HOST>:4040` para acompanhar o progresso na Application UI.
+
+---
+
+### 17.10 Verificando o resultado no Ozone
+
+**Listar os arquivos de resultado gerados pelo job:**
+
+```bash
+docker compose exec ozone-om ozone sh key list /lab/output/bolsafamilia-por-uf
+```
+
+**Baixar e visualizar um arquivo de resultado** (substitua `<NOME_DO_ARQUIVO>` por uma das keys listadas acima que comece com `part-`):
+
+```bash
+docker compose exec ozone-om ozone sh key get \
+    /lab/output/bolsafamilia-por-uf/<NOME_DO_ARQUIVO> \
+    /tmp/resultado.csv
+```
+
+```bash
+docker compose exec ozone-om cat /tmp/resultado.csv
+```
+
+Saída esperada:
+```
+UF,TOTAL_PAGO
+AC,XXXXXXX.0
+AL,XXXXXXX.0
+AM,XXXXXXX.0
+...
+```
+
+> **Nota:** O resultado completo também é exibido no console durante a execução do job, na saída do `resultado.show(30)`.
 
 ---
 
