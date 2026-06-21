@@ -989,13 +989,13 @@ docker compose exec ozone-om ozone sh volume create /lab
 **Criar o bucket para dados brutos:**
 
 ```bash
-docker compose exec ozone-om ozone sh bucket create /lab/raw
+docker compose exec ozone-om ozone sh bucket create --replication-factor ONE /lab/raw
 ```
 
 **Criar o bucket para o resultado do processamento:**
 
 ```bash
-docker compose exec ozone-om ozone sh bucket create /lab/output
+docker compose exec ozone-om ozone sh bucket create --replication-factor ONE /lab/output
 ```
 
 **Verificar a estrutura criada:**
@@ -1133,9 +1133,15 @@ Author: Prof. Barbosa
 Contact: infobarbosa@gmail.com
 
 Uso:
-    docker compose exec spark-master spark-submit \
-        --jars /data/ozone-filesystem-hadoop3.jar \
-        /apps/example-job.py
+    docker compose exec spark-master spark-submit /apps/example-job.py
+
+Pré-requisito (ver Seção 17.6 do tutorial):
+    docker cp ozone-om:/opt/hadoop/share/ozone/lib/ozone-filesystem-hadoop3-client-2.1.0.jar \
+        /tmp/ozone-filesystem-hadoop3.jar
+    for container in spark-master spark-worker-1 spark-worker-2; do
+        docker cp /tmp/ozone-filesystem-hadoop3.jar \
+            ${container}:/opt/spark/jars/ozone-filesystem-hadoop3.jar
+    done
 """
 
 from pyspark.sql import SparkSession
@@ -1150,6 +1156,7 @@ spark = SparkSession.builder \
     .config("spark.hadoop.fs.o3fs.impl",
             "org.apache.hadoop.fs.ozone.OzoneFileSystem") \
     .config("spark.hadoop.ozone.om.address", "ozone-om") \
+    .config("spark.hadoop.ozone.replication", "1") \
     .getOrCreate()
 
 print("=" * 60)
@@ -1218,6 +1225,7 @@ EOF
 |-----------|-------|-----------|
 | `spark.hadoop.fs.o3fs.impl` | `org.apache.hadoop.fs.ozone.OzoneFileSystem` | Registra a implementação do esquema `o3fs://` no Spark. Sem essa configuração, qualquer acesso a caminhos `o3fs://` falha com `No FileSystem for scheme`. |
 | `spark.hadoop.ozone.om.address` | `ozone-om` | Hostname do Ozone Manager (OM). O Spark usa esse endereço para resolver os metadados de volumes, buckets e keys. |
+| `spark.hadoop.ozone.replication` | `1` | Fator de replicação usado pelo cliente Ozone nos workers do Spark ao gravar dados. Os containers Spark não lêem o `ozone-site.xml` dos containers Ozone, então sem essa config o padrão `THREE` é usado — o que falha com apenas 1 DataNode. |
 | `/opt/spark/jars/ozone-filesystem-hadoop3.jar` | *(instalação no sistema)* | O JAR deve estar no diretório `jars/` do Spark em todos os nós. Isso o coloca no classloader do sistema, permitindo que `ProtobufRpcEngine` (Hadoop 3.4.x) encontre as classes do protocolo RPC do Ozone. |
 | `o3fs://bucket.volume/caminho` | *(URI de dados)* | Formato da URI do Ozone: `raw.lab` indica o bucket `raw` dentro do volume `lab`. O trecho após `/` é o nome da key (arquivo ou prefixo de diretório) dentro do bucket. |
 | `sep=";"` | *(opção de leitura CSV)* | O arquivo usa ponto-e-vírgula como separador de campos, padrão em arquivos CSV brasileiros. |

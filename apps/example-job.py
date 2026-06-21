@@ -29,6 +29,7 @@ spark = SparkSession.builder \
     .config("spark.hadoop.fs.o3fs.impl",
             "org.apache.hadoop.fs.ozone.OzoneFileSystem") \
     .config("spark.hadoop.ozone.om.address", "ozone-om") \
+    .config("spark.hadoop.ozone.replication", "1") \
     .getOrCreate()
 
 print("=" * 60)
