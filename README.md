@@ -115,7 +115,7 @@ Ao final deste laboratório, a estrutura completa será:
 ```
 spark-lab/
 ├── .env                         # Variáveis de ambiente
-├── docker-compose.yml           # Orquestração dos serviços
+├── compose.yml                  # Orquestração dos serviços
 ├── spark/
 │   ├── Dockerfile               # Imagem customizada do Spark
 │   ├── entrypoint.sh            # Script de inicialização
@@ -131,7 +131,7 @@ spark-lab/
 
 ## 5. Arquivo de Variáveis de Ambiente (.env)
 
-O arquivo `.env` centraliza as configurações que o Docker Compose vai utilizar. Isso facilita a manutenção e evita valores hardcoded no `docker-compose.yml`.
+O arquivo `.env` centraliza as configurações que o Docker Compose vai utilizar. Isso facilita a manutenção e evita valores hardcoded no `compose.yml`.
 
 Crie o arquivo:
 
@@ -499,7 +499,7 @@ EOF
 
 ## 10. Docker Compose
 
-O `docker-compose.yml` é o arquivo central que orquestra todos os containers. Ele define:
+O `compose.yml` é o arquivo central que orquestra todos os containers. Ele define:
 - Os 3 serviços do Spark (1 master + 2 workers)
 - Os 3 serviços do Ozone (SCM + OM + DataNode)
 - A rede bridge com IPs fixos
@@ -508,7 +508,7 @@ O `docker-compose.yml` é o arquivo central que orquestra todos os containers. E
 Crie o arquivo:
 
 ```bash
-cat <<'EOF' > docker-compose.yml
+cat <<'EOF' > compose.yml
 # ============================================
 # Apache Spark Cluster Lab
 # Docker Compose - Todos os serviços
