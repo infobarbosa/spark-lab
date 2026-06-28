@@ -101,7 +101,7 @@ Docker Compose version v2.x.x
 Vamos criar a estrutura de diretórios do projeto:
 
 ```bash
-mkdir -p spark ozone apps data
+mkdir -p spark apps data
 ```
 
 Verifique a estrutura criada:
@@ -120,8 +120,6 @@ spark-lab/
 │   ├── Dockerfile               # Imagem customizada do Spark
 │   ├── entrypoint.sh            # Script de inicialização
 │   └── spark-defaults.conf      # Configuração do Spark
-├── ozone/
-│   └── ozone-site.xml           # Configuração do Ozone
 ├── apps/
 │   └── example-job.py           # Template para jobs PySpark
 └── data/                        # Dados para processamento
@@ -420,80 +418,23 @@ O **Apache Ozone** é um sistema de armazenamento distribuído compatível com a
 
 Neste lab, vamos usar o setup mínimo: **1 SCM + 1 OM + 1 DataNode**.
 
-Crie o arquivo de configuração:
+A configuração do Ozone é feita diretamente via **variáveis de ambiente** no `compose.yml`, usando o prefixo `OZONE-SITE.XML_`. O entrypoint da imagem oficial `apache/ozone` converte automaticamente essas variáveis em propriedades no `ozone-site.xml` dentro de cada container durante a inicialização.
 
-```bash
-cat <<'EOF' > ozone/ozone-site.xml
-<?xml version="1.0" encoding="UTF-8"?>
-<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
-<!--
-    Apache Ozone - Configuração Mínima
-    Setup com 1 SCM + 1 OM + 1 DataNode
--->
-<configuration>
+> **Nota:** Não é necessário criar um arquivo `ozone-site.xml` manualmente. Todas as propriedades são definidas na seção `environment` de cada serviço Ozone no `compose.yml`.
 
-    <!-- Endereço do Ozone Manager -->
-    <property>
-        <name>ozone.om.address</name>
-        <value>ozone-om</value>
-    </property>
+As principais propriedades configuradas são:
 
-    <!-- Endereço do Storage Container Manager -->
-    <property>
-        <name>ozone.scm.names</name>
-        <value>ozone-scm</value>
-    </property>
-
-    <property>
-        <name>ozone.scm.client.address</name>
-        <value>ozone-scm</value>
-    </property>
-
-    <property>
-        <name>ozone.scm.block.client.address</name>
-        <value>ozone-scm</value>
-    </property>
-
-    <!-- Diretórios de dados e metadados -->
-    <property>
-        <name>ozone.scm.datanode.id.dir</name>
-        <value>/data/metadata</value>
-    </property>
-
-    <property>
-        <name>ozone.metadata.dirs</name>
-        <value>/data/metadata</value>
-    </property>
-
-    <property>
-        <name>hdds.datanode.dir</name>
-        <value>/data/hdds</value>
-    </property>
-
-    <!-- Safe mode: aceitar com apenas 1 DataNode -->
-    <property>
-        <name>hdds.scm.safemode.min.datanode</name>
-        <value>1</value>
-    </property>
-
-    <!-- Replicação: 1 cópia (temos apenas 1 DataNode) -->
-    <property>
-        <name>ozone.replication</name>
-        <value>ONE</value>
-    </property>
-
-</configuration>
-EOF
-```
-
-**Entendendo as propriedades:**
-
-| Propriedade | Descrição |
-|-------------|-----------|
-| `ozone.om.address` | Hostname do Ozone Manager (nome do container Docker) |
-| `ozone.scm.names` | Hostname do SCM |
-| `hdds.scm.safemode.min.datanode` | Mínimo de DataNodes para sair do modo seguro. Setamos `1` porque temos apenas um DataNode. |
-| `ozone.replication` | Fator de replicação. `ONE` porque temos um único DataNode. Em produção, use `THREE`. |
+| Propriedade | Valor | Descrição |
+|-------------|-------|-----------|
+| `ozone.om.address` | `ozone-om` | Hostname do Ozone Manager (nome do container Docker) |
+| `ozone.scm.names` | `ozone-scm` | Hostname do SCM |
+| `ozone.scm.client.address` | `ozone-scm` | Endereço do cliente SCM |
+| `ozone.scm.block.client.address` | `ozone-scm` | Endereço do cliente de blocos SCM |
+| `ozone.metadata.dirs` | `/data/metadata` | Diretório de metadados |
+| `ozone.scm.datanode.id.dir` | `/data/metadata/datanode` | Diretório de IDs do DataNode |
+| `hdds.datanode.dir` | `/data/hdds` | Diretório de dados do DataNode |
+| `hdds.scm.safemode.min.datanode` | `1` | Mínimo de DataNodes para sair do safe mode |
+| `ozone.replication` | `ONE` | Fator de replicação (`ONE` porque temos apenas 1 DataNode) |
 
 ---
 
@@ -611,6 +552,9 @@ services:
       OZONE-SITE.XML_ozone.scm.block.client.address: ozone-scm
       OZONE-SITE.XML_ozone.metadata.dirs: /data/metadata
       OZONE-SITE.XML_ozone.scm.datanode.id.dir: /data/metadata/datanode
+      OZONE-SITE.XML_hdds.datanode.dir: /data/hdds
+      OZONE-SITE.XML_hdds.scm.safemode.min.datanode: "1"
+      OZONE-SITE.XML_ozone.replication: ONE
     command: >
       bash -c "
         if [ ! -d /data/metadata/scm/current ]; then
@@ -647,6 +591,9 @@ services:
       OZONE-SITE.XML_ozone.scm.block.client.address: ozone-scm
       OZONE-SITE.XML_ozone.metadata.dirs: /data/metadata
       OZONE-SITE.XML_ozone.scm.datanode.id.dir: /data/metadata/datanode
+      OZONE-SITE.XML_hdds.datanode.dir: /data/hdds
+      OZONE-SITE.XML_hdds.scm.safemode.min.datanode: "1"
+      OZONE-SITE.XML_ozone.replication: ONE
     command: >
       bash -c "
         if [ ! -d /data/metadata/om/current ]; then
@@ -680,6 +627,9 @@ services:
       OZONE-SITE.XML_ozone.scm.block.client.address: ozone-scm
       OZONE-SITE.XML_ozone.metadata.dirs: /data/metadata
       OZONE-SITE.XML_ozone.scm.datanode.id.dir: /data/metadata/datanode
+      OZONE-SITE.XML_hdds.datanode.dir: /data/hdds
+      OZONE-SITE.XML_hdds.scm.safemode.min.datanode: "1"
+      OZONE-SITE.XML_ozone.replication: ONE
     command: ["ozone", "datanode"]
     ports:
       - "9882:9882"    # DataNode Web UI
