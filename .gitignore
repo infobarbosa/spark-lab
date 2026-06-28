@@ -1,3 +1,4 @@
+.env
 *.tgz
 *.tar.gz
 .claude/*
