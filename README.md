@@ -989,13 +989,13 @@ docker compose exec ozone-om ozone sh volume create /lab
 **Criar o bucket para dados brutos:**
 
 ```bash
-docker compose exec ozone-om ozone sh bucket create --replication-factor ONE /lab/raw
+docker compose exec ozone-om ozone sh bucket create --replication ONE --type RATIS /lab/raw
 ```
 
 **Criar o bucket para o resultado do processamento:**
 
 ```bash
-docker compose exec ozone-om ozone sh bucket create --replication-factor ONE /lab/output
+docker compose exec ozone-om ozone sh bucket create --replication ONE --type RATIS /lab/output
 ```
 
 **Verificar a estrutura criada:**
