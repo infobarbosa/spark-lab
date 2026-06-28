@@ -1306,6 +1306,92 @@ AM,XXXXXXX.0
 
 ---
 
+### 17.11 - Job de leitura dos resultados
+
+```sh
+echo <<'EOF' > /apps/read-results-job.py
+"""
+Apache Spark Cluster Lab
+Job: Bolsa Família - Leitura dos Resultados por UF
+
+Author: Prof. Barbosa
+Contact: infobarbosa@gmail.com
+
+Uso:
+    docker compose exec spark-master spark-submit /apps/read-results.py
+
+Pré-requisito:
+    O script example-job.py deve ter sido executado previamente, pois este
+    script lê o resultado gravado em o3fs://output.lab/bolsafamilia-por-uf.
+"""
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import format_number
+
+# ============================================
+# Inicializar SparkSession com suporte ao Ozone
+# ============================================
+spark = SparkSession.builder \
+    .appName("bolsa-familia-read-results") \
+    .config("spark.hadoop.fs.o3fs.impl",
+            "org.apache.hadoop.fs.ozone.OzoneFileSystem") \
+    .config("spark.hadoop.ozone.om.address", "ozone-om") \
+    .config("spark.hadoop.ozone.replication", "1") \
+    .getOrCreate()
+
+spark.sparkContext.setLogLevel("WARN")
+
+print("=" * 60)
+print(" SparkSession inicializada com sucesso!")
+print(f" App Name : {spark.sparkContext.appName}")
+print(f" Master   : {spark.sparkContext.master}")
+print(f" Version  : {spark.version}")
+print("=" * 60)
+
+# ============================================
+# Leitura do resultado em Parquet a partir do Ozone
+# ============================================
+OUTPUT_PATH = "o3fs://output.lab/bolsafamilia-por-uf"
+
+print(f"\nLendo resultado de: {OUTPUT_PATH}")
+
+df = spark.read.parquet(OUTPUT_PATH)
+
+# ============================================
+# Exibição no terminal
+# ============================================
+print("\nSchema do resultado:")
+df.printSchema()
+
+total_ufs = df.count()
+print(f"Total de UFs no resultado: {total_ufs}")
+
+print("\n" + "=" * 60)
+print("  TOTAL DE PAGAMENTOS DO BOLSA FAMÍLIA POR UF")
+print("=" * 60)
+
+df_formatado = df \
+    .orderBy("UF") \
+    .withColumn("TOTAL_PAGO_BRL", format_number("TOTAL_PAGO", 2))
+
+df_formatado.select("UF", "TOTAL_PAGO_BRL").show(total_ufs, truncate=False)
+
+# Total geral
+total_geral = df.agg({"TOTAL_PAGO": "sum"}).collect()[0][0]
+print(f"TOTAL GERAL (todas as UFs): R$ {total_geral:,.2f}")
+print("=" * 60)
+
+print("\nLeitura concluída com sucesso!")
+spark.stop()
+EOF
+
+```
+
+```sh
+docker compose exec spark-master spark-submit /apps/read-results-job.py
+
+```
+
 ## 18. Parando o Cluster
 
 Para parar todos os containers (sem perder dados):
