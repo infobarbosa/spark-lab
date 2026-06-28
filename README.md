@@ -125,6 +125,12 @@ spark-lab/
 └── data/                        # Dados para processamento
 ```
 
+Vamos criar a árvore de diretórios:
+```bash
+mkdir -p spark apps data
+
+```
+
 ---
 
 ## 5. Arquivo de Variáveis de Ambiente (.env)
