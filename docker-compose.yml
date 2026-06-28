@@ -106,7 +106,7 @@ services:
       - "9876:9876"    # SCM Web UI
     volumes:
       - ./ozone/ozone-site.xml:/etc/hadoop/ozone-site.xml
-      - ozone-scm-data:/data
+      - ./ozone/data/scm:/data
     networks:
       spark-net:
         ipv4_address: 172.30.0.20
@@ -136,7 +136,7 @@ services:
       - "9874:9874"    # OM Web UI
     volumes:
       - ./ozone/ozone-site.xml:/etc/hadoop/ozone-site.xml
-      - ozone-om-data:/data
+      - ./ozone/data/om:/data
     networks:
       spark-net:
         ipv4_address: 172.30.0.21
@@ -156,7 +156,7 @@ services:
       - "9882:9882"    # DataNode Web UI
     volumes:
       - ./ozone/ozone-site.xml:/etc/hadoop/ozone-site.xml
-      - ozone-dn-data:/data
+      - ./ozone/data/datanode:/data
     networks:
       spark-net:
         ipv4_address: 172.30.0.22
@@ -180,6 +180,3 @@ networks:
 # ============================================
 volumes:
   spark-events:
-  ozone-scm-data:
-  ozone-om-data:
-  ozone-dn-data:
