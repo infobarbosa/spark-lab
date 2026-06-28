@@ -102,6 +102,7 @@ Vamos criar a estrutura de diretórios do projeto:
 
 ```bash
 mkdir -p spark apps data
+
 ```
 
 Verifique a estrutura criada:
@@ -123,12 +124,6 @@ spark-lab/
 ├── apps/
 │   └── example-job.py           # Template para jobs PySpark
 └── data/                        # Dados para processamento
-```
-
-Vamos criar a árvore de diretórios:
-```bash
-mkdir -p spark apps data
-
 ```
 
 ---
