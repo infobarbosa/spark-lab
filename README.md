@@ -1208,8 +1208,7 @@ OUTPUT_PATH = "o3fs://output.lab/bolsafamilia-por-uf"
 
 resultado.write \
     .mode("overwrite") \
-    .option("header", "true") \
-    .csv(OUTPUT_PATH)
+    .parquet(OUTPUT_PATH)
 
 print(f"\nResultado gravado em: {OUTPUT_PATH}")
 print("Job finalizado com sucesso!")
@@ -1272,7 +1271,13 @@ Job finalizado com sucesso!
 **Listar os arquivos de resultado gerados pelo job:**
 
 ```bash
-docker compose exec ozone-om ozone sh key list /lab/output/bolsafamilia-por-uf
+docker compose exec ozone-om ozone sh key list --prefix bolsafamilia-por-uf lab/output
+
+```
+
+```bash
+docker compose exec ozone-om ozone sh key list -a --prefix bolsafamilia-por-uf lab/output
+
 ```
 
 **Baixar e visualizar um arquivo de resultado** (substitua `<NOME_DO_ARQUIVO>` por uma das keys listadas acima que comece com `part-`):
@@ -1280,11 +1285,12 @@ docker compose exec ozone-om ozone sh key list /lab/output/bolsafamilia-por-uf
 ```bash
 docker compose exec ozone-om ozone sh key get \
     /lab/output/bolsafamilia-por-uf/<NOME_DO_ARQUIVO> \
-    /tmp/resultado.csv
+    /tmp/resultado.parquet
 ```
 
 ```bash
-docker compose exec ozone-om cat /tmp/resultado.csv
+docker compose exec ozone-om parquet-tools show /tmp/resultado.parquet
+
 ```
 
 Saída esperada:
