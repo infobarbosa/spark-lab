@@ -1260,7 +1260,7 @@ AM,XXXXXXX.0
 ### 17.11 - Job de leitura dos resultados
 
 ```sh
-echo <<'EOF' > /apps/read-results-job.py
+cat <<'EOF' > apps/read-results-job.py
 """
 Apache Spark Cluster Lab
 Job: Bolsa Família - Leitura dos Resultados por UF
